@@ -338,8 +338,8 @@ app.post("/api/admin/client-links", async (req, res) => {
       [clientId, token, expiresAt],
     )
 
-    const clientNameForUrl = client.name.toLowerCase().replace(/\s+/g, "-")
-    const paymentUrl = `https://zorvixetechnologies.onrender.com/payment/${clientNameForUrl}/${token}`
+    // Fixed payment URL structure
+    const paymentUrl = `https://zorvixetechnologies.onrender.com/payment/${token}`
 
     res.status(201).json({
       success: true,
@@ -448,8 +448,8 @@ app.post("/api/admin/candidate-links", async (req, res) => {
       [candidateId, token, expiresAt],
     )
 
-    const candidateNameForUrl = candidate.name.toLowerCase().replace(/\s+/g, "-")
-    const onboardingUrl = `https://zorvixetechnologies.onrender.com/onboarding/${candidateNameForUrl}/${token}`
+    // Fixed onboarding URL structure
+    const onboardingUrl = `https://zorvixetechnologies.onrender.com/onboarding/${token}`
 
     res.status(201).json({
       success: true,
