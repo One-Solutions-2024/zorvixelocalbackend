@@ -46,6 +46,11 @@ app.use(cors())
 app.use(express.json())
 app.use("/uploads", express.static("uploads"))
 
+
+app.use(cors({
+  origin: "*", // Allow all origins for development
+}));
+
 // PostgreSQL setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
