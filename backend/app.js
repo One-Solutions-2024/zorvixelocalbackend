@@ -45,8 +45,6 @@ const upload = multer({
 app.use(cors())
 app.use(express.json())
 app.use("/uploads", express.static("uploads"))
-
-
 app.use(cors({
   origin: "*", // Allow all origins for development
 }));
@@ -130,7 +128,7 @@ const initializeDb = async () => {
       )
     `)
 
-    // New candidates table
+    // Candidates table - PDFs stored permanently
     await pool.query(`
       CREATE TABLE IF NOT EXISTS candidates (
         id SERIAL PRIMARY KEY,
@@ -144,7 +142,7 @@ const initializeDb = async () => {
       )
     `)
 
-    // New candidate_links table
+    // Candidate links table - only links expire, not the PDFs
     await pool.query(`
       CREATE TABLE IF NOT EXISTS candidate_links (
         id SERIAL PRIMARY KEY,
@@ -157,7 +155,7 @@ const initializeDb = async () => {
       )
     `)
 
-    // New candidate_uploads table
+    // Candidate uploads table - PDFs persist permanently
     await pool.query(`
       CREATE TABLE IF NOT EXISTS candidate_uploads (
         id SERIAL PRIMARY KEY,
@@ -208,11 +206,11 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" })
 })
 
-// Contact form submission (existing)
+// Contact form submission
 app.post("/api/contact/submit", async (req, res) => {
   const { name, email, phone, subject, message } = req.body
-  const errors = {}
 
+  const errors = {}
   if (!name || name.trim().length < 3) errors.name = "Name must be at least 3 characters"
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = "Valid email is required"
   if (!phone || !/^[6-9]\d{9}$/.test(phone)) errors.phone = "Valid 10-digit phone number starting with 6-9 is required"
@@ -270,7 +268,7 @@ app.get("/api/contacts", async (req, res) => {
   }
 })
 
-// CLIENT MANAGEMENT ROUTES (existing)
+// CLIENT MANAGEMENT ROUTES
 app.post("/api/admin/clients", async (req, res) => {
   const { name, email, phone, company, projectName, paymentAmount, projectDescription } = req.body
 
@@ -325,6 +323,7 @@ app.post("/api/admin/client-links", async (req, res) => {
 
   try {
     const clientResult = await pool.query(`SELECT * FROM clients WHERE id = $1`, [clientId])
+
     if (clientResult.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Client not found" })
     }
@@ -343,7 +342,6 @@ app.post("/api/admin/client-links", async (req, res) => {
       [clientId, token, expiresAt],
     )
 
-    // Fixed payment URL structure
     const paymentUrl = `https://zorvixetechnologies.onrender.com/payment/${token}`
 
     res.status(201).json({
@@ -360,7 +358,6 @@ app.post("/api/admin/client-links", async (req, res) => {
 })
 
 // CANDIDATE MANAGEMENT ROUTES
-
 // Create new candidate
 app.post("/api/admin/candidates", async (req, res) => {
   const { name, email, phone, position } = req.body
@@ -428,12 +425,13 @@ app.get("/api/admin/candidates", async (req, res) => {
   }
 })
 
-// Generate onboarding link for candidate
+// Generate onboarding link for candidate (link expires, not PDF)
 app.post("/api/admin/candidate-links", async (req, res) => {
   const { candidateId } = req.body
 
   try {
     const candidateResult = await pool.query(`SELECT * FROM candidates WHERE id = $1`, [candidateId])
+
     if (candidateResult.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Candidate not found" })
     }
@@ -441,7 +439,7 @@ app.post("/api/admin/candidate-links", async (req, res) => {
     const candidate = candidateResult.rows[0]
     const token = crypto.randomBytes(32).toString("hex")
     const expiresAt = new Date()
-    expiresAt.setHours(expiresAt.getHours() + 2) // Set expiration to 2 hours from now
+    expiresAt.setHours(expiresAt.getHours() + 5) // Link expires in 5 hours (changed from 2 hours)
 
     // Deactivate any existing links for this candidate
     await pool.query(`UPDATE candidate_links SET active = false WHERE candidate_id = $1`, [candidateId])
@@ -453,7 +451,6 @@ app.post("/api/admin/candidate-links", async (req, res) => {
       [candidateId, token, expiresAt],
     )
 
-    // Fixed onboarding URL structure
     const onboardingUrl = `https://zorvixetechnologies.onrender.com/onboarding/${token}`
 
     res.status(201).json({
@@ -504,7 +501,7 @@ app.put("/api/admin/candidate-links/:candidateId/toggle", async (req, res) => {
   }
 })
 
-// Get candidate details by token
+// Get candidate details by token (check if link is valid, not PDF)
 app.get("/api/candidate-details/:token", async (req, res) => {
   const { token } = req.params
 
@@ -525,8 +522,8 @@ app.get("/api/candidate-details/:token", async (req, res) => {
     }
 
     const link = linkResult.rows[0]
-
     const candidateResult = await pool.query(`SELECT * FROM candidates WHERE id = $1`, [link.candidate_id])
+
     if (candidateResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -536,7 +533,7 @@ app.get("/api/candidate-details/:token", async (req, res) => {
 
     const candidate = candidateResult.rows[0]
 
-    // Check if already uploaded
+    // Check if already uploaded (PDF persists even if link expires)
     const uploadResult = await pool.query(`SELECT * FROM candidate_uploads WHERE candidate_id = $1`, [candidate.id])
 
     res.status(200).json({
@@ -557,12 +554,12 @@ app.get("/api/candidate-details/:token", async (req, res) => {
   }
 })
 
-// Upload candidate PDF
+// Upload candidate PDF (PDF stored permanently, only link expires)
 app.post("/api/candidate/upload/:token", upload.single("certificate"), async (req, res) => {
   const { token } = req.params
 
   try {
-    // Verify token
+    // Verify token (only link expires, not the ability to access uploaded PDFs)
     const linkResult = await pool.query(
       `SELECT cl.*, c.* FROM candidate_links cl
        JOIN candidates c ON cl.candidate_id = c.id
@@ -601,7 +598,7 @@ app.post("/api/candidate/upload/:token", upload.single("certificate"), async (re
       })
     }
 
-    // Save upload details
+    // Save upload details (PDF stored permanently)
     const uploadResult = await pool.query(
       `INSERT INTO candidate_uploads (candidate_id, file_name, file_path, file_size)
        VALUES ($1, $2, $3, $4)
@@ -609,7 +606,7 @@ app.post("/api/candidate/upload/:token", upload.single("certificate"), async (re
       [candidate.id, req.file.originalname, req.file.path, req.file.size],
     )
 
-    // Mark link as completed
+    // Mark link as completed (link can expire, but PDF remains)
     await pool.query(`UPDATE candidate_links SET upload_completed = true WHERE id = $1`, [link.id])
 
     // Update candidate status
@@ -617,7 +614,7 @@ app.post("/api/candidate/upload/:token", upload.single("certificate"), async (re
 
     res.status(201).json({
       success: true,
-      message: "Certificate uploaded successfully",
+      message: "Certificate uploaded successfully. The file will be stored permanently.",
       upload: uploadResult.rows[0],
     })
   } catch (error) {
@@ -634,7 +631,7 @@ app.post("/api/candidate/upload/:token", upload.single("certificate"), async (re
   }
 })
 
-// Download candidate PDF (admin only)
+// Download candidate PDF (admin only - PDFs never expire)
 app.get("/api/admin/candidate-download/:candidateId", async (req, res) => {
   const { candidateId } = req.params
 
@@ -684,6 +681,7 @@ app.put("/api/admin/candidates/:id/status", async (req, res) => {
   const { status } = req.body
 
   const validStatuses = ["pending", "documents_uploaded", "approved", "rejected"]
+
   if (!validStatuses.includes(status)) {
     return res.status(400).json({
       success: false,
@@ -715,7 +713,7 @@ app.put("/api/admin/candidates/:id/status", async (req, res) => {
   }
 })
 
-// Existing payment routes continue here...
+// CLIENT PAYMENT ROUTES
 app.put("/api/admin/client-links/:clientId/toggle", async (req, res) => {
   const { clientId } = req.params
   const { active } = req.body
@@ -770,8 +768,8 @@ app.get("/api/client-details/:token", async (req, res) => {
     }
 
     const link = linkResult.rows[0]
-
     const clientResult = await pool.query(`SELECT * FROM clients WHERE id = $1`, [link.client_id])
+
     if (clientResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -780,7 +778,6 @@ app.get("/api/client-details/:token", async (req, res) => {
     }
 
     const client = clientResult.rows[0]
-
     const dueDate = new Date()
     dueDate.setDate(dueDate.getDate() + 7)
 
@@ -935,8 +932,8 @@ app.get("/api/admin/payments/:id", async (req, res) => {
     const { id } = req.params
     const result = await pool.query(
       `SELECT pr.*, c.email as client_email, c.phone as client_phone, c.company 
-       FROM payment_registrations pr 
-       LEFT JOIN clients c ON pr.client_id = c.id 
+       FROM payment_registrations pr
+       LEFT JOIN clients c ON pr.client_id = c.id
        WHERE pr.id = $1`,
       [id],
     )
@@ -977,7 +974,7 @@ app.put("/api/admin/payments/:id/status", async (req, res) => {
     const result = await pool.query(
       `UPDATE payment_registrations 
        SET status = $1 
-       WHERE id = $2 
+       WHERE id = $2
        RETURNING *`,
       [status, id],
     )
@@ -1018,14 +1015,14 @@ app.get("/api/admin/payments/search", async (req, res) => {
     const searchTerm = `%${query}%`
     const result = await pool.query(
       `SELECT pr.*, c.email as client_email, c.phone as client_phone 
-       FROM payment_registrations pr 
-       LEFT JOIN clients c ON pr.client_id = c.id 
+       FROM payment_registrations pr
+       LEFT JOIN clients c ON pr.client_id = c.id
        WHERE pr.client_name ILIKE $1 
           OR pr.project_name ILIKE $1 
           OR pr.project_id ILIKE $1 
-          OR pr.zorvixe_id ILIKE $1 
-         OR pr.reference_id ILIKE $1 
-       ORDER BY pr.created_at DESC 
+          OR pr.zorvixe_id ILIKE $1
+         OR pr.reference_id ILIKE $1
+       ORDER BY pr.created_at DESC
        LIMIT 20`,
       [searchTerm],
     )
